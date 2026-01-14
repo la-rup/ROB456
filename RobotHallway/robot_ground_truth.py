@@ -61,7 +61,10 @@ class RobotGroundTruth:
         #     Yes, you can store dictionaries in dictionaries
         # Check that the probabilities sum to one and are between 0 and 1
 
-        # YOUR CODE HERE
+        self.move_probabilities["move_left"] = {"left_true": move_left,
+                                                "left_false": move_right}
+        
+        assert(self.move_probabilities.get())
 
     def set_move_right_probabilities(self, move_left=0.05, move_right=0.8):
         """ Set the three discrete probabilities for moving right (should sum to one and all be positive)
@@ -74,7 +77,7 @@ class RobotGroundTruth:
         #     Yes, you can store dictionaries in dictionaries
         # Check that the probabilities sum to one and are between 0 and 1
 
-        # YOUR CODE HERE
+        self.move_probabilities["move_right"] = {}
 
     def set_move_continuos_probabilities(self, sigma=0.1):
         """ Set the noise for continuous movement
