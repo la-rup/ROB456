@@ -190,7 +190,6 @@ class RobotGroundTruth:
 
         noisy_amount = amount + np.random.normal(0, self.move_probabilities["move_continuous"]["sigma"])
 
-
         # Actually move (don't run off of end)
         return self._move_clamped_continuous(noisy_amount)
 
