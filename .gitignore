@@ -139,5 +139,6 @@ dmypy.json
 ros_ws/
 Assignments/.OTTER_LOG
 Activities/.OTTER_LOG
+RobotHallway/.OTTER_LOG
 log/*
 install/*
