@@ -101,11 +101,12 @@ class Lab3Driver(Node):
 		self.target.point.y = 0.0
 
 		# GUIDE: Declare any variables here
-  # YOUR CODE HERE
+		self.robot_sz = 0.38	# robot size
 
 		# Timer to make sure we publish the target marker (once we get a goal)
 		self.marker_timer = self.create_timer(1.0, self._marker_callback)
 
+		self.count_since_last_scan = 0
 		self.print_twist_messages = False
 		self.print_distance_messages = False
 
@@ -132,6 +133,7 @@ class Lab3Driver(Node):
 				self.target_marker.action = Marker.DELETE
 				self.target_pub.publish(self.target_marker)
 				self.target_marker = None
+				self.get_logger().info(f"Driver: Had an existing target marker; removing")
 			return
 		
 		# If we do not currently have a marker, make one
@@ -139,6 +141,8 @@ class Lab3Driver(Node):
 			self.target_marker = Marker()
 			self.target_marker.header.frame_id = self.goal.header.frame_id
 			self.target_marker.id = 0
+		
+			self.get_logger().info(f"Driver: Creating Marker")
 
 		# Build a marker for the target point
 		#   - this prints out the green dot in RViz (the current target)
@@ -191,8 +195,7 @@ class Lab3Driver(Node):
 		""" Return true if close enough to goal. This will be used in action_callback to stop moving toward the goal
 		@ return true/false """
 
-  # YOUR CODE HERE
-		return False
+		return self.distance_to_target() <= self.threshold
 
 	def distance_to_target(self):
 		""" Communicate with send points - set to distance to target"""
@@ -219,11 +222,10 @@ class Lab3Driver(Node):
 		self.set_target()
 
 		# Keep publishing feedback, then sleeping (so the laser scan can happen)
-		# GUIDE for Lab3: If you aren't making progress, stop the while loop and mark the goal as failed
+		# GUIDE: If you aren't making progress, stop the while loop and mark the goal as failed
 		rate = self.create_rate(0.5)
 		while not self.close_enough():
 			if not self.goal:
-				# GUIDE: This will get called in lab 3 if you cancel a goal
 				self.get_logger().info(f"Goal was canceled")
 
 				return result
@@ -294,7 +296,6 @@ class Lab3Driver(Node):
 		
 		# GUIDE: Calculate any additional variables here
 		#  Remember that the target's location is in its own coordinate frame at 0,0, angle 0 (x-axis)
-  # YOUR CODE HERE
 
 		return self.target
 
@@ -304,6 +305,8 @@ class Lab3Driver(Node):
 	
 		if self.print_twist_messages:
 			self.get_logger().info("In scan callback")
+		# Got a scan - set back to zero
+		self.count_since_last_scan = 0
 
 		# If we have a goal, then act on it, otherwise stay still
 		if self.goal:
@@ -327,12 +330,49 @@ class Lab3Driver(Node):
 		@return Currently True/False and speed, angular turn"""
 
 		if not self.target:
-			return False, 0.0, 0.0
-		
+			return False, 0.0, 0.0, 0.0
+
 		# GUIDE: Use this method to collect obstacle information - is something in front of, to the left, or to 
 		# the right of the robot? Start with your stopper code from Lab1
-  # YOUR CODE HERE
-		return False, 0.0, 0.0
+
+		max_speed = 0.2         # This moves about 0.01 m between scans
+		max_turn = np.pi * 0.1  # This turns about 2 degrees between scans
+
+		# Calculate distances from scans
+		theta = np.linspace(scan.angle_min, scan.angle_max, num=len(scan.ranges), endpoint=True)
+		scan_array = np.array(scan.ranges)
+		xs = scan_array * np.cos(theta)
+		ys = scan_array * np.sin(theta)
+
+		# Left, right, front min_dists of angles
+		turn_threshold = 0.3	# Turning threshold
+		front_scans = np.where((xs > 0.0) & (np.abs(ys) < (self.robot_sz / 2)))
+		right_scans = np.where((xs > 0.0) & (ys < -(self.robot_sz / 2)))
+		left_scans = np.where((xs > 0.0) & (ys > (self.robot_sz / 2)))
+
+		front_min = np.min(scan_array[front_scans])
+		right_min = np.min(scan_array[right_scans])
+		left_min = np.min(scan_array[left_scans])
+
+		# Use tanh to create speed scaler and then multiply with robot speed    
+		stopping_dist = 0.25
+		speed_scale = np.tanh(front_min)
+		robot_speed = speed_scale * max_speed 
+		#turn_scale = np.tanh(1.0 - front_min)
+		turn_speed = max_turn
+
+		# if obstacle is in front
+		if front_min < stopping_dist:
+
+			# if it's on the left
+			if left_min > right_min:
+				return True, robot_speed, turn_speed, front_min
+			else:
+				return True, robot_speed, -turn_speed, front_min
+				
+		# otherwise no obstacle
+		else:
+			return False, robot_speed, 0.0, front_min
 
 	def get_twist(self, scan):
 		"""This is the method that calculate the twist
@@ -354,15 +394,37 @@ class Lab3Driver(Node):
 		min_speed = 0.05
 		max_speed = 0.2         # This moves about 0.01 m between scans
 		max_turn = np.pi * 0.1  # This turns about 2 degrees between scans
+		turn_threshold = 0.3	# Turning threshold
 
-  # YOUR CODE HERE
+		# Add way to turn robot towards target
+		theta_target = atan2(self.target.point.y, self.target.point.x)
 
-		# t.twist.linear.x = max_speed
-		# t.twist.angular.z = 0.0
+		# Get obstacle info
+		obstacle_bool, robot_speed, turn_speed, front_min = self.get_obstacle(scan)
+
+		# if there is an obstacle in front
+		if obstacle_bool:
+			t.twist.linear.x = robot_speed
+			t.twist.angular.z = turn_speed
+		else:
+			# if target is behind
+			if self.target.point.x < 0:
+				t.twist.linear.x = 0.0
+				t.twist.angular.z = max_turn * np.sign(theta_target)
+			
+			# if target is near the front but maybe off-centered
+			elif abs(theta_target) > turn_threshold:
+				t.twist.linear.x = 0.0
+				t.twist.angular.z = max_turn * np.sign(theta_target)
+			
+			# if target is in front
+			else:
+				t.twist.linear.x = robot_speed
+				t.twist.angular.z = 0.0
+			
 		if self.print_twist_messages:
 			self.get_logger().info(f"Setting twist forward {t.twist.linear.x} angle {t.twist.angular.z}")
 		return t			
-
 
 # The idiom in ROS2 is to use a function to do all of the setup and work.  This
 # function is referenced in the setup.py file as the entry point of the node when

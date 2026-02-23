@@ -58,7 +58,6 @@ class MyStopper(Node):
 		# GUIDE
 		# Use angle min, max, and number of readings to calculate the theta value for each scan
 		# This should be a numpy array of length num_readings, that starts at angle_min and ends at angle_max
-		theta = np.linspace(angle_min, angle_max, num=num_readings)
 
 		# GUIDE: Determine what the closest obstacle/reading is for scans in front of the robot
 		#  Step 1: Determine which of the range readings correspond to being "in front of" the robot (see comment at top)
@@ -72,35 +71,38 @@ class MyStopper(Node):
 		# DO NOT hard-wire in the number of readings, or the min/max angle. You CAN hardwire in the size of the robot
 
 		# Calculate distances from scans
-		x = scan.ranges * np.cos(theta)
-		y = scan.ranges * np.sin(theta)
+		theta = np.linspace(angle_min, angle_max, num=num_readings)
+		np_ranges = np.array(scan.ranges)
+		xs = np_ranges * np.cos(theta)
+		ys = np_ranges * np.sin(theta)
 
 		# Find scans where robot could bump into something (y < half robot size) and minimum distance
 		scan_array = np.array(scan.ranges)
-		close_scans = np.where(np.abs(y) <= (self.robot_sz / 2))
+		close_scans = np.where(np.abs(ys) <= (self.robot_sz / 2))
 		dists = scan_array[close_scans]
 		min_dist = np.min(dists)
 
 		# Use min dist to scale the robot speed
 		shortest = 0.0
 		max_speed = 0.2
+		stopping_distance = 1.0
 
-		speed_scale = np.tanh(min_dist)
-		robot_speed = speed_scale * max_speed
-		stopping_threshold = 0.1 + (self.robot_sz / 2)
-		turning_threshold = 0.2 + (self.robot_sz / 2)
+		# Use tanh to create speed scaler and then multiply with robot speed    
+		speed_scale = np.tanh(min_dist - stopping_distance)
+		robot_speed = speed_scale * max_speed 
 
 		# Create a twist and fill in all the fields (you will only set t.linear.x).
 		t = TwistStamped()
 		t.header = Header()
 		t.header.frame_id = 'base_link'  # Transform is in the robot's coordinate frame
 		t.header.stamp = self.get_clock().now().to_msg()  # What time are we sending this?
-		t.twist.linear.x = 0.0 if min_dist <= stopping_threshold else robot_speed
+		t.twist.linear.x = 0.0 if abs(min_dist - stopping_distance) < 0.01 else robot_speed
 		t.twist.linear.y = 0.0
 		t.twist.linear.z = 0.0
 		t.twist.angular.x = 0.0
 		t.twist.angular.y = 0.0
-		t.twist.angular.z = 0.1 if min_dist < turning_threshold else 0.0
+		# t.twist.angular.z = 0.1 if min_dist < turning_threshold else 0.0
+		t.twist.angular.z = 0.0
 
 		# Send the command to the robot.
 		self.pub.publish(t)
