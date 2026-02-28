@@ -193,24 +193,60 @@ def dijkstra(im, robot_loc=(0, 0), goal_loc=(0, 0)):
         #  Step 3: Set the node to closed
         #    Now do the instructions from the slide (the actual algorithm)
         #  See also lecture slides
-        # YOUR CODE HERE
+
+        # if current node is goal node
+        if visited_distance == goal_loc:
+            break
+        # if node is closed
+        if visited_closed_yn:
+            continue
+        # set node to closed
+        visited[current_node_ij] = (visited_distance, visited_parent, True)
+
+        # algorithm dijkstra w/four connected implementation
+        for p in four_connected(current_node_ij):
+            if not is_free(im, p):
+                continue
+
+            dist = distance_to_current_node + 1
+            if p in visited:
+                if visited[p][2]:
+                    if dist < visited[p][0]:
+                        visited[p] = (dist, current_node_ij, False)
+                        heapq.heappush(priority_queue, (dist, p))
+            else:
+                visited[p] = (dist, current_node_ij, False)
+                heapq.heappush(priority_queue, (dist, p))
 
     # Now check that we actually found the goal node
     if not goal_loc in visited:
-        print(f"Goal {goal_loc} not reached, taking closest")
+        #print(f"Goal {goal_loc} not reached, taking closest")
 
         # GUIDE: Deal with not being able to get to the goal loc
         #   If the goal location is not reachable, find the node closest to the goal 
         #.  and return the path to it - you'll want this for the ROS 2 assignment
-        # YOUR CODE HERE
+        goal_loc_array = np.array(goal_loc)
+        visited_list = list(visited.keys())
+
+        # check for node closest
+        dists = []
+        for p in visited_list:
+            p_array = np.array(p)
+            dists.append(np.linalg.norm(goal_loc_array - p_array))  # find closest distance
+        # indx to closest node to goal
+        indx = int(np.argmin(dists))    # find index for closest node
+        goal_loc = visited_list[indx]
 
     path = []
     path.append(goal_loc)
     # GUIDE: Build the path by starting at the goal node and working backwards
-    # YOUR CODE HERE
+    indx = goal_loc
+    while indx is not None:     # while indx still exists
+        path.append(indx)
+        indx = visited[indx][1]     # visited_parent at that node
 
+    path.reverse()
     return path
-
 
 def open_image(im_name):
     """ A helper function to open up the image and the yaml file and threshold
