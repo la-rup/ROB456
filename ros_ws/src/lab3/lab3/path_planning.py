@@ -195,7 +195,7 @@ def dijkstra(im, robot_loc=(0, 0), goal_loc=(0, 0)):
         #  See also lecture slides
 
         # if current node is goal node
-        if visited_distance == goal_loc:
+        if current_node_ij == goal_loc:
             break
         # if node is closed
         if visited_closed_yn:
@@ -203,12 +203,12 @@ def dijkstra(im, robot_loc=(0, 0), goal_loc=(0, 0)):
         # set node to closed
         visited[current_node_ij] = (visited_distance, visited_parent, True)
 
-        # algorithm dijkstra w/four connected implementation
+        # algorithm A* w/four connected implementation
         for p in four_connected(current_node_ij):
             if not is_free(im, p):
                 continue
-
-            dist = distance_to_current_node + 1
+            heuristic_dist = np.abs(p[0] - goal_loc[0]) + np.abs(p[1] - goal_loc[1])
+            dist = distance_to_current_node + heuristic_dist
             if p in visited:
                 if visited[p][2]:
                     if dist < visited[p][0]:
