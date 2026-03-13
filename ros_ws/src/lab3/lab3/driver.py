@@ -227,8 +227,8 @@ class Lab3Driver(Node):
 		while not self.close_enough():
 			if not self.goal:
 				self.get_logger().info(f"Goal was canceled")
-
-				return result
+				result.success = False
+				break
 			
 			feedback = NavTarget.Feedback()
 			feedback.distance.data = self.distance_to_target()
@@ -330,7 +330,7 @@ class Lab3Driver(Node):
 		@return Currently True/False and speed, angular turn"""
 
 		if not self.target:
-			return False, 0.0, 0.0, 0.0
+			return False, 0.0, 0.0
 
 		# GUIDE: Use this method to collect obstacle information - is something in front of, to the left, or to 
 		# the right of the robot? Start with your stopper code from Lab1
@@ -344,35 +344,30 @@ class Lab3Driver(Node):
 		xs = scan_array * np.cos(theta)
 		ys = scan_array * np.sin(theta)
 
-		# Left, right, front min_dists of angles
-		turn_threshold = 0.3	# Turning threshold
+		# Front min_dists of angles
 		front_scans = np.where((xs > 0.0) & (np.abs(ys) < (self.robot_sz / 2)))
-		right_scans = np.where((xs > 0.0) & (ys < -(self.robot_sz / 2)))
-		left_scans = np.where((xs > 0.0) & (ys > (self.robot_sz / 2)))
-
 		front_min = np.min(scan_array[front_scans])
-		right_min = np.min(scan_array[right_scans])
-		left_min = np.min(scan_array[left_scans])
 
 		# Use tanh to create speed scaler and then multiply with robot speed    
-		stopping_dist = 0.25
+		stopping_dist = 0.50
 		speed_scale = np.tanh(front_min)
 		robot_speed = speed_scale * max_speed 
-		#turn_scale = np.tanh(1.0 - front_min)
 		turn_speed = max_turn
 
 		# if obstacle is in front
 		if front_min < stopping_dist:
+			y_front = ys[front_scans]
+			y_avg = np.mean(y_front)
 
-			# if it's on the left
-			if left_min > right_min:
-				return True, robot_speed, turn_speed, front_min
+			# determine turn direction
+			if y_avg > 0:
+				turn_dir = -1	# turn right
 			else:
-				return True, robot_speed, -turn_speed, front_min
-				
+				turn_dir = 1	# turn left
+			return True, 0.05, turn_dir * max_turn	
 		# otherwise no obstacle
 		else:
-			return False, robot_speed, 0.0, front_min
+			return False, robot_speed, 0.0
 
 	def get_twist(self, scan):
 		"""This is the method that calculate the twist
@@ -400,27 +395,28 @@ class Lab3Driver(Node):
 		theta_target = atan2(self.target.point.y, self.target.point.x)
 
 		# Get obstacle info
-		obstacle_bool, robot_speed, turn_speed, front_min = self.get_obstacle(scan)
+		obstacle_bool, robot_speed, turn_speed = self.get_obstacle(scan)
 
 		# if there is an obstacle in front
 		if obstacle_bool:
 			t.twist.linear.x = robot_speed
 			t.twist.angular.z = turn_speed
+			return t
+
+		# if target is behind
+		if self.target.point.x < 0:
+			t.twist.linear.x = 0.0
+			t.twist.angular.z = max_turn * np.sign(theta_target)
+		
+		# if target is near the front but maybe off-centered
+		elif abs(theta_target) > turn_threshold:
+			t.twist.linear.x = 0.0
+			t.twist.angular.z = max_turn * np.sign(theta_target)
+		
+		# if target is in front
 		else:
-			# if target is behind
-			if self.target.point.x < 0:
-				t.twist.linear.x = 0.0
-				t.twist.angular.z = max_turn * np.sign(theta_target)
-			
-			# if target is near the front but maybe off-centered
-			elif abs(theta_target) > turn_threshold:
-				t.twist.linear.x = 0.0
-				t.twist.angular.z = max_turn * np.sign(theta_target)
-			
-			# if target is in front
-			else:
-				t.twist.linear.x = robot_speed
-				t.twist.angular.z = 0.0
+			t.twist.linear.x = robot_speed
+			t.twist.angular.z = 0.0
 			
 		if self.print_twist_messages:
 			self.get_logger().info(f"Setting twist forward {t.twist.linear.x} angle {t.twist.angular.z}")

@@ -97,7 +97,9 @@ def is_reachable(im, pix):
     # GUIDE: Returns True (the pixel is adjacent to a pixel that is free)
     #  False otherwise
     # You can use four or eight connected - eight will return more points
-    # YOUR CODE HERE
+    for p in path_planning.eight_connected(pix):
+        if path_planning.is_free(im, p):      # if pixel adjacent to free pixel
+            return True
     return False
 
 
@@ -107,8 +109,28 @@ def find_all_possible_goals(im):
     This is because of noise in the map - there may be some isolated pixels
     @param im - thresholded image
     @return list of possible pixel (x,y) locations"""
+    possible_goals = []
+    img_height, img_width = im.shape
 
-    # YOUR CODE HERE
+    # looping through every pixel within image
+    for j in range(img_height):
+        for i in range(img_width):
+            p = (i, j)  # one pixel
+
+            # if pixel is unseen
+            if not path_planning.is_unseen(im, p):
+                continue
+
+            # for all neighbors of unseen pixel
+            for n in path_planning.eight_connected(p):
+                ni, nj = n  # neighbor pixel
+
+                # if neighbor fits within image space
+                if 0 <= ni < img_width and 0 <= nj < img_height:
+                    if path_planning.is_free(im, n):        # if pixel is free
+                        possible_goals.append(p)
+                        break
+    return possible_goals
 
 
 def find_best_point(im, possible_points : list, robot_loc):
@@ -117,7 +139,34 @@ def find_best_point(im, possible_points : list, robot_loc):
     @param possible_points - possible points to chose from (list of tuples)
     @param robot_loc - location of the robot (in case you want to factor that in)
     """
-    # YOUR CODE HERE
+    best_dist = np.inf
+    best_pt = None
+
+    for p in possible_points:
+        pt_dif = np.sqrt((p[0] - robot_loc[0])**2 + (p[1] - robot_loc[1])**2)
+
+        # if does not have 3 free neighbors
+        if not test_best(im, p):
+            continue
+
+        # if not a wall pixel
+        if path_planning.is_wall(im, p):
+            continue
+
+        # if new dist difference is less than previous best 
+        if pt_dif < best_dist:
+            best_dist = pt_dif
+            best_pt = p
+
+        # now return one of the neighbors of best pt
+        for n in path_planning.eight_connected(best_pt):
+            ni, nj = n
+            if 0 <= ni < im.shape[1] and 0 <= nj < im.shape[0]:
+                if path_planning.is_free(im, n):
+                    return (ni, nj)
+
+    # only returns if free unseen neighbor cant be found
+    return best_pt
 
 
 def find_waypoints(im, path):
@@ -127,7 +176,18 @@ def find_waypoints(im, path):
     @ return - a new path"""
 
     # Again, no right answer here
-    # YOUR CODE HERE
+    waypoints = []
+
+    # only take every 7th waypoint for new path
+    subsample_pts = 7
+    for i in range(0, len(path), subsample_pts):
+        waypoints.append(path[i])
+
+    # just making sure we grab the last waypoint from OG path
+    if waypoints[-1] != path[-1]:
+        waypoints.append(path[-1])
+
+    return waypoints
 
 
 def test_unseen(im, pts):

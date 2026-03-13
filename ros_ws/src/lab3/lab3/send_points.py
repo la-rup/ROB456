@@ -165,9 +165,18 @@ class SendPoints(Node):
 		@param feedback - data created by the action server - this has the distance in it (as a float)"""
 		
 		# Right now not doing anything but publishing the current distance
+		dist_counter = 0
 		
-		self.last_distance = feedback.feedback.distance.data
+		if self.last_distance == feedback.feedback.distance.data:
+			dist_counter += 1
+		else:
+			self.last_distance = feedback.feedback.distance.data
+
 		self.get_logger().info(f'Feedback: Distance: {feedback.feedback.distance.data}')
+
+		if dist_counter > 5:
+			self.replace_goal_points()
+			self.get_logger().info(f"No goal progress, replacing all goal points.")
 
 	def _cancel_response_callback(self, future : Future):
 		""" This is a call and response to the server to check that it actually canceled the goal"""

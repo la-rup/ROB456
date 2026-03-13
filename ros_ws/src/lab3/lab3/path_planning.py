@@ -203,12 +203,12 @@ def dijkstra(im, robot_loc=(0, 0), goal_loc=(0, 0)):
         # set node to closed
         visited[current_node_ij] = (visited_distance, visited_parent, True)
 
-        # algorithm A* w/four connected implementation
-        for p in four_connected(current_node_ij):
+        # algorithm A* w/eight connected implementation
+        for p in eight_connected(current_node_ij):
             if not is_free(im, p):
                 continue
-            heuristic_dist = np.abs(p[0] - goal_loc[0]) + np.abs(p[1] - goal_loc[1])
-            dist = distance_to_current_node + heuristic_dist
+            euclid_dist = np.sqrt((p[0] - goal_loc[0])**2 + (p[1] - goal_loc[1])**2)
+            dist = distance_to_current_node + euclid_dist
             if p in visited:
                 if visited[p][2]:
                     if dist < visited[p][0]:
