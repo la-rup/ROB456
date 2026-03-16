@@ -88,6 +88,12 @@ class SendPoints(Node):
 		self.path_marker_pub = self.create_publisher(MarkerArray, 'path_points', 1)
 		self.reachable_marker_pub = self.create_publisher(MarkerArray, 'reachable_points', 1)
 
+		# Variable to track first map
+		self.received_map = False
+
+		# Flag for replanning
+		self.should_replan = False
+		self.dist_counter = 0
 
 	def _start_action_client(self):
 		""" This gets called by the timer whenever a new set of goals needs to be kicked off"""
@@ -100,9 +106,14 @@ class SendPoints(Node):
 			self.get_logger().info("Start driver.py to get started")
 			self.action_client.wait_for_server()
 		
+		# No points yet
+		if len(self.goal_points) == 0:
+			self.get_logger().info("Waiting for first map") 
+			self.start_timer.reset()
+			return
 		# Run out of goal points
 		if self.next_goal_index >= len(self.goal_points):
-			self.next_goal_index += 1
+			# self.next_goal_index += 1
 			self.get_logger().info("No more points to send")
 			return
 			
@@ -150,33 +161,55 @@ class SendPoints(Node):
 		result: NavTarget.Result = future.result().result
 		if result.success:
 			self.get_logger().info(f"Got to goal {self.next_goal_index}, moving to next")
+			# only replan when the goal point had bee reached - not at each waypoint
+			if self.next_goal_index >= len(self.goal_points):
+				self.should_replan = True
 			self.start_timer.reset()  # Increment to the next goal	
 		else:
 			# GUIDE: This is where you should flag if you want to bail on the current set of goals
 			# entirely or just skip to the next one
 			self.get_logger().info(f"Did not get to goal, skipping {self.next_goal_index}")
+			# drop all goals and replan form current position
+			self.goal_points = []
+			self.next_goal_index = 0
+			#force replan
+			self.should_replan = True
+			self.skip_current_goal()
+			self.dist_counter = 0
 
 		self._send_goal_future = None
 		self._result_future = None
 		self._cancel_future = None
 
 	def _feedback_callback(self, feedback):
-		"""Every time driver loops in the action callback it send back the distance to the target as feedbackack
+		"""Every time driver loops in the action callback it send back the distance to the target as feedback
 		@param feedback - data created by the action server - this has the distance in it (as a float)"""
 		
-		# Right now not doing anything but publishing the current distance
-		dist_counter = 0
+		# Saving current distance for tracking
+		curr_dist = feedback.feedback.distance.dist
 		
-		if self.last_distance == feedback.feedback.distance.data:
-			dist_counter += 1
-		else:
-			self.last_distance = feedback.feedback.distance.data
+		# If first feedback response received
+		if self.last_distance is None:
+			self.last_distance = curr_dist
+			self.dist_counter = 0		# initialize counter
 
+		# If the distance hasn't changed, increment counter
+		if curr_dist == self.last_distance:
+			self.dist_counter += 1
+		# Otherwise reset counter
+		else:
+			self.dist_counter = 0
+			self.last_distance = curr_dist
+
+		# Send distance feedback
 		self.get_logger().info(f'Feedback: Distance: {feedback.feedback.distance.data}')
 
-		if dist_counter > 5:
-			self.replace_goal_points()
-			self.get_logger().info(f"No goal progress, replacing all goal points.")
+		# If distance received is the same 5 times, replace all goals
+		if self.dist_counter >= 5:
+			self.get_logger().info(f"No goal progress, skipping current goal point.")
+			self.skip_current_goal()	# skip current goal
+			self.dist_counter = 0		# reset counter
+
 
 	def _cancel_response_callback(self, future : Future):
 		""" This is a call and response to the server to check that it actually canceled the goal"""
@@ -202,7 +235,7 @@ class SendPoints(Node):
 	def completed_all_goals(self):
 		""" Returns True if all of the goals have been completed
 		GUIDE Use this to check if there are any goals left to do y/n"""
-		if self.next_goal_index > len(self.goal_points):
+		if self.next_goal_index >= len(self.goal_points):
 			return True    # Went through all goals
 		
 	def add_more_goal_points(self, goal_pts: list):
@@ -215,7 +248,7 @@ class SendPoints(Node):
 
 		# This will kick start sending more goal points if it's stopped sending
 		if self._result_future == None:
-			self.start_timer().reset()   # Increment to the next goal
+			self.start_timer.reset()   # Increment to the next goal
 	
 	def replace_goal_points(self, goal_pts: list, skip_current: bool):
 		""" Replace the current list of goal points, and, optionally, skip the current
@@ -408,13 +441,11 @@ class SendPoints(Node):
 		@return pt_uv - point in the image"""
 		info = map_msg.info
 
-		im_u = 0
-		im_v = 0
-
 		# GUIDE: Subtract the origin position of the map and then divide by the resolution
 		#   Don't forget to cast to an int
-  # YOUR CODE HERE
-		
+		im_u = int((pt_xy[0] - info.origin.position.x) / info.resolution)
+		im_v = int((pt_xy[1] - info.origin.position.y) / info.resolution)
+
 		# self.get_logger().info(f"before {pt_xy} after {im_u}, {im_v}")
 		return (im_u, im_v)
 			
@@ -425,11 +456,10 @@ class SendPoints(Node):
 		@return pt_xy - point in the world"""
 		info = map_msg.info
 
-		pt_x = 0.0
-		pt_y = 0.0
 		# GUIDE: Multiply by the resolution then add the origin position of the map 
-  # YOUR CODE HERE
 		# self.get_logger().info(f"before {pt_uv} after {pt_x}, {pt_y}")
+		pt_x = (pt_uv[0] * info.resolution) + info.origin.position.x
+		pt_y = (pt_uv[1] * info.resolution) + info.origin.position.y
 		return (pt_x, pt_y)
 
 	def map_callback(self, map_msg : OccupancyGrid):
@@ -481,8 +511,8 @@ class SendPoints(Node):
 
 		if 0 < goal_loc_in_image[0] < map_msg.info.width and 0 < goal_loc_in_image[1] < map_msg.info.height:
 			# Headed towards last goal and it is now in the free space of the robot
-			goal_loc_in_image = find_best_point(im, all_unseen_pts, robot_current_loc_in_image)  # Use your exploring code to find a good point
-			self.get_logger().info(f"Getting best {goal_loc_in_image} {is_free(im, goal_loc_in_image)}")
+			goal_loc_in_image = find_best_point(im_thresh, all_unseen_pts, robot_current_loc_in_image)  # Use your exploring code to find a good point
+			self.get_logger().info(f"Getting best {goal_loc_in_image} {is_free(im_thresh, goal_loc_in_image)}")
 		else:
 			# This just looks for the last viable goal (that is free) - will grab a goal
 			#  that's already been seen
@@ -523,6 +553,17 @@ class SendPoints(Node):
 			self.get_logger().info(f"Replacing way points with new ones {path_pts}")	
 			self.replace_goal_points(path_pts, False)
 
+		# If this is the first time map_update has been called
+		if not self.received_map:
+			self.received_map = True 	# Change to True, first map_update called
+			self.get_logger().info("First map_update received, changing path.")
+			self.replace_goal_points(path_pts, False)		# Replace path
+			
+		# If distance received is the same 5 times, replace all goals
+		if self.dist_counter >= 5:
+			self.get_logger().info(f"No goal progress, replacing all goal points.")
+			self.replace_goal_points(path_pts, False)		# Replace path
+			self.dist_counter = 0
 
 # Unlike all the previous code, here we'll start up with a list of points to go to
 def main(args=None):
@@ -530,9 +571,10 @@ def main(args=None):
 	rclpy.init(args=args)
 
 	# Create a list of points that will take the robot through the map
-	points = [(-4.5, -3.0), (-4.5, 0.0), (-1.0, 0.0)]
+	# points = [(-4.5, -3.0), (-4.5, 0.0), (-1.0, 0.0)]
+	points = []
 	send_points = SendPoints(points)
-
+	
 	# Multi-threaded execution
 	executor = MultiThreadedExecutor()
 	executor.add_node(send_points)
